@@ -1,7 +1,5 @@
 # Telegram Smart Notes
 
-🇮🇹 [Versione italiana](README.it.md)
-
 A Telegram bot for "smart" reminders: write a message in natural language (e.g. _"remind me to call the bank tomorrow at 3 pm"_) and the bot, powered by Google Gemini, automatically extracts the task, the deadline and any recurrence. It includes a web dashboard (also usable as a Telegram Mini App) to manage your reminders from a browser.
 
 ## Features
