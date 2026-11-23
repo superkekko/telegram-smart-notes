@@ -1,7 +1,3 @@
-import 'dotenv/config';
-import TelegramBot from 'node-telegram-bot-api';
-import fs from 'fs';
-import path from 'path';
 import { startScheduler } from './scheduler-service.js';
 import {
     saveNote,
@@ -17,8 +13,11 @@ import {
 } from './db-service.js';
 import { classifyInput } from './nlp-service.js';
 import { formatNoteForReply, escapeMarkdown } from './utils.js';
+import 'dotenv/config';
+import TelegramBot from 'node-telegram-bot-api';
+import fs from 'fs';
+import path from 'path';
 import { startWebServer } from './web-server.js';
-import { t, LANGUAGE, TIMEZONE } from './i18n.js';
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 let bot;
@@ -37,7 +36,7 @@ const isAuthorized = async (chatId) => {
 
 async function sendNotesList(notes, chatId) {
     if (notes.length === 0) {
-        await bot.sendMessage(chatId, t('bot.list.empty'));
+        await bot.sendMessage(chatId, `✅ Nessun promemoria attivo trovato.`);
         return;
     }
 
@@ -65,16 +64,16 @@ async function processAndSaveInput(chatId, classification, fileId = null, localP
 
 async function setBotCommands(bot) {
     const commands = [
-        { command: 'list', description: t('bot.cmd.list') },
-        { command: 'help', description: t('bot.cmd.help') },
-        { command: 'login', description: t('bot.cmd.login') }
+        { command: 'list', description: 'Visualizza i tuoi promemoria attivi' },
+        { command: 'help', description: 'Informazioni su come usare il bot' },
+        { command: 'login', description: 'Accedi alla web dashboard' }
     ];
 
     try {
         await bot.setMyCommands(commands);
-        console.log("✅ Bot commands registered on Telegram.");
+        console.log("✅ Comandi del bot registrati su Telegram.");
     } catch (error) {
-        console.error("❌ Error while registering bot commands:", error);
+        console.error("❌ Errore durante la registrazione dei comandi:", error);
     }
 }
 
@@ -82,10 +81,15 @@ function setupBotListeners() {
     bot.onText(/\/start/, async (msg) => {
         const chatId = msg.chat.id;
         if (!(await isAuthorized(chatId))) {
-            return bot.sendMessage(chatId, t('bot.unauthorized'));
+            return bot.sendMessage(chatId, '❌ Accesso non autorizzato. Contatta l\'amministratore.');
         }
 
-        await bot.sendMessage(chatId, t('bot.welcome'), { parse_mode: 'Markdown' });
+        const welcomeMessage = ` Benvenuto nel sistema *Smart Assistant*!\n\n` +
+                                `Sono il tuo assistente personale per i promemoria.\n\n` +
+                                `Usa /help per vedere l'elenco dei comandi.\n\n` +
+                                `*Per aggiungere una nota*, scrivi semplicemente cosa vuoi ricordare (es. _comprare il latte domani mattina alle 9_ o _ricordami di chiamare la banca tra mezz'ora_).`;
+
+        await bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
     });
 
     bot.onText(/\/login/, async (msg) => {
@@ -99,7 +103,7 @@ function setupBotListeners() {
         const loginUrl = `${baseUrl}?chatId=${chatId}`;
 
         await bot.sendMessage(chatId,
-            t('bot.login', { code, url: loginUrl }),
+            ` *Accesso Dashboard*\n\nIl tuo codice: \`${code}\`\n\n[Clicca qui per entrare](${loginUrl})`,
             { parse_mode: 'Markdown' }
         );
     });
@@ -107,56 +111,69 @@ function setupBotListeners() {
     bot.onText(/\/authorize (\d+)(?:\s+(.+))?/, async (msg, match) => {
         const senderId = String(msg.chat.id);
         if (!MASTER_ADMINS.includes(senderId)) {
-            return bot.sendMessage(senderId, t('bot.admin_only'));
+            return bot.sendMessage(senderId, "❌ Comando riservato ai Master Admin.");
         }
 
         const targetId = match[1];
         const manualName = match[2];
 
         try {
-            let name = t('bot.authorize.default_name');
-            let username = null;
+            let name = "Utente";
+            let username = "N/A";
 
             if (manualName) {
                 name = manualName;
             } else {
                 try {
                     const chat = await bot.getChat(targetId);
-                    name = chat.first_name || name;
-                    username = chat.username ? `@${chat.username}` : null;
+                    name = chat.first_name || "Utente";
+                    username = chat.username ? `@${chat.username}` : "N/A";
                 } catch (e) {
-                    console.log("⚠️ getChat failed, using the default name.");
-                    name = t('bot.authorize.unknown_name');
+                    console.log("⚠️ getChat fallito, uso nome di default.");
+                    name = "Utente Sconosciuto";
                 }
             }
 
-            await addAuthorizedUser(targetId, name, username);
+            await addAuthorizedUser(targetId, name, username !== "N/A" ? username : null);
 
             await bot.sendMessage(senderId,
-                t('bot.authorize.success', { name: escapeMarkdown(name), id: targetId }),
+                `✅ **Utente Autorizzato**\n Nome: ${escapeMarkdown(name)}\n ID: \`${targetId}\``,
                 { parse_mode: 'Markdown' }
             );
         } catch (error) {
-            console.error("Error while authorizing user:", error);
-            bot.sendMessage(senderId, t('bot.authorize.error'));
+            console.error("Errore durante l'autorizzazione:", error);
+            bot.sendMessage(senderId, "⚠️ Errore durante il salvataggio dell'utente.");
         }
     });
 
     bot.onText(/\/stats/, async (msg) => {
         const chatId = msg.chat.id;
         if (!MASTER_ADMINS.includes(String(chatId))) {
-            return bot.sendMessage(chatId, t('bot.admin_only'));
+            return bot.sendMessage(chatId, "❌ Comando riservato ai Master Admin.");
         }
 
         const dbStats = await getSystemStats();
-        await bot.sendMessage(chatId, t('bot.stats', dbStats), { parse_mode: 'Markdown' });
+
+        let statusMessage = ` **SYSTEM HEALTH REPORT** \n\n`;
+        statusMessage += ` **DB Size:** ${dbStats.dbSize} MB\n\n`;
+        statusMessage += ` **CONTENUTI**\n`;
+        statusMessage += ` Note totali: ${dbStats.notes}\n`;
+        statusMessage += ` Utenti autorizzati: ${dbStats.users}\n\n`;
+        statusMessage += `✅ Sistema operativo e online.`;
+
+        await bot.sendMessage(chatId, statusMessage, { parse_mode: 'Markdown' });
     });
 
     bot.onText(/\/help/, async (msg) => {
         const chatId = msg.chat.id;
         if (!(await isAuthorized(chatId))) return;
 
-        await bot.sendMessage(chatId, t('bot.help'), { parse_mode: 'Markdown' });
+        const helpMessage = ` *Guida Comandi Smart Assistant:*\n\n` +
+                                `*Gestione Note:*\n` +
+                                `  /list \- Mostra tutti i promemoria attivi (ognuno ha i suoi pulsanti *Fatto/Cancella*).\n` +
+                                `  /login \- Accedi alla web dashboard.`;
+
+        await bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
     });
 
     bot.onText(/\/list/, async (msg) => {
@@ -173,32 +190,51 @@ function setupBotListeners() {
         const chatId = msg.chat.id;
         if (!(await isAuthorized(chatId))) return;
 
+        // Pattern semplificato per sole note
         const match = action.match(/^(DONE_NOTE|DELETE_NOTE|VIEWFILE_NOTE)_(\d+)$/);
         if (!match) return;
 
         const operation = match[1];
         const inputId = parseInt(match[2]);
 
-        const editMessage = (text) => bot.editMessageText(text, {
-            chat_id: chatId,
-            message_id: msg.message_id,
-            parse_mode: 'Markdown'
-        });
-
         try {
             if (operation === 'DONE_NOTE') {
                 const note = await getNoteById(inputId, chatId);
                 const success = await completeNote(inputId, chatId);
                 if (success && note.recurrence) {
-                    await editMessage(t('bot.note.done_recurring'));
+                    await bot.editMessageText(`✅ Nota ricorrente rinnovata.`, {
+                        chat_id: chatId,
+                        message_id: msg.message_id,
+                        parse_mode: 'Markdown'
+                    });
                 } else if (success) {
-                    await editMessage(t('bot.note.done'));
+                    await bot.editMessageText(`✅ Promemoria completato.`, {
+                        chat_id: chatId,
+                        message_id: msg.message_id,
+                        parse_mode: 'Markdown'
+                    });
                 } else {
-                    await editMessage(t('bot.note.done_noop'));
+                    await bot.editMessageText(`Promemoria non modificato (già completato o inesistente).`, {
+                        chat_id: chatId,
+                        message_id: msg.message_id,
+                        parse_mode: 'Markdown'
+                    });
                 }
             } else if (operation === 'DELETE_NOTE') {
                 const success = await deleteNote(inputId, chatId);
-                await editMessage(success ? t('bot.note.deleted') : t('bot.note.not_found'));
+                if (success) {
+                    await bot.editMessageText(`❌ Promemoria eliminato.`, {
+                        chat_id: chatId,
+                        message_id: msg.message_id,
+                        parse_mode: 'Markdown'
+                    });
+                } else {
+                    await bot.editMessageText(`❌ Errore: Promemoria non trovato.`, {
+                        chat_id: chatId,
+                        message_id: msg.message_id,
+                        parse_mode: 'Markdown'
+                    });
+                }
             } else if (operation === 'VIEWFILE_NOTE') {
                 const note = await getNoteById(inputId, chatId);
 
@@ -208,21 +244,21 @@ function setupBotListeners() {
                         try {
                             await bot.sendChatAction(chatId, 'upload_document');
                             await bot.sendDocument(chatId, fs.createReadStream(absolutePath), {
-                                caption: t('bot.note.attachment_caption', { task: note.task })
+                                caption: ` Allegato per: ${note.task}`
                             });
                             await bot.answerCallbackQuery(callbackQuery.id);
                         } catch (err) {
-                            console.error("❌ Error while sending the file:", err);
-                            await bot.answerCallbackQuery(callbackQuery.id, { text: t('bot.file.error') });
+                            console.error("❌ Errore invio file fisico:", err);
+                            await bot.answerCallbackQuery(callbackQuery.id, { text: "Errore tecnico nell'invio del file." });
                         }
                     } else {
-                        await bot.answerCallbackQuery(callbackQuery.id, { text: t('bot.file.missing') });
+                        await bot.answerCallbackQuery(callbackQuery.id, { text: "File non trovato sul disco." });
                     }
                 }
             }
         } catch (error) {
-            console.error(`❌ ERROR while handling callback ${action}:`, error);
-            await bot.answerCallbackQuery(callbackQuery.id, { text: t('bot.callback.error') });
+            console.error(`❌ ERRORE nella gestione del callback ${action}:`, error);
+            await bot.answerCallbackQuery(callbackQuery.id, { text: 'Si è verificato un errore.' });
         }
     });
 
@@ -238,28 +274,30 @@ function setupBotListeners() {
         if (msg.photo || msg.document) {
             fileId = msg.photo ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id;
             try {
-                localPath = await bot.downloadFile(fileId, './data/attachments');
+                const downloadPath = await bot.downloadFile(fileId, './data/attachments');
+                localPath = downloadPath;
             } catch (err) {
-                console.error("❌ Error while downloading the file:", err);
+                console.error("❌ Errore nel download del file:", err);
             }
         }
 
         if (!textToClassify && !fileId) return;
+        let classification = null;
 
         try {
             await bot.sendChatAction(chatId, 'typing');
-            const classification = await classifyInput(textToClassify || t('bot.note.attachment_only'));
+            classification = await classifyInput(textToClassify || "Promemoria solo con allegato");
             await processAndSaveInput(chatId, classification, fileId, localPath);
         } catch (error) {
-            console.error('❌ ERROR during automatic classification/saving:', error);
-            await bot.sendMessage(chatId, t('bot.classify.error'));
+            console.error('❌ ERRORE nella classificazione/salvataggio automatico:', error);
+            await bot.sendMessage(chatId, '❌ Si è verificato un errore durante la classificazione. Riprova più tardi.');
         }
     });
 }
 
 function startBotPolling() {
     if (bot) {
-        try { bot.stopPolling(); } catch (e) { console.warn('⚠️ Error while stopping polling:', e.message); }
+        try { bot.stopPolling(); } catch (e) { console.warn('⚠️ Errore arresto polling:', e.message); }
     }
 
     bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -268,7 +306,7 @@ function startBotPolling() {
 
     bot.on('polling_error', (error) => {
         if (error.code === 'EFATAL' && error.message.includes('401')) {
-            console.error('❌ [FATAL POLLING ERROR] Telegram token invalid or expired.');
+            console.error('❌ [POLLING FATALE] Token Telegram non valido o scaduto.');
             return;
         }
 
@@ -276,7 +314,7 @@ function startBotPolling() {
            .then(() => {
                setTimeout(startBotPolling, POLLING_RESTART_DELAY);
            })
-           .catch(() => {
+           .catch(err => {
                setTimeout(startBotPolling, POLLING_RESTART_DELAY);
            });
     });
@@ -284,15 +322,15 @@ function startBotPolling() {
 
 export async function startSystem() {
     try {
-        console.log(`⌛ Starting Smart Assistant (language: ${LANGUAGE}, timezone: ${TIMEZONE})...`);
+        console.log("⌛ Sistema Smart Assistant in avvio...");
         await initializeDb();
-        console.log("✅ SQLite database initialized.");
+        console.log("✅ Database SQLite inizializzato.");
         startBotPolling();
         startScheduler(() => bot);
         startWebServer();
-        console.log('✅ Polling, scheduler and web dashboard are up!');
+        console.log('✅ Polling, Schedulatore e Dashboard Web attivi!');
     } catch (err) {
-        console.error("❌ FATAL ERROR: unable to start the system:", err);
+        console.error("❌ ERRORE FATALE: Impossibile avviare il sistema:", err);
         process.exit(1);
     }
 }

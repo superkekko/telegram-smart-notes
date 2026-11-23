@@ -8,12 +8,11 @@ import {
     getUncompletedExpiredNotes
 } from './db-service.js';
 import { formatNoteForReply } from './utils.js';
-import { t, TIMEZONE } from './i18n.js';
 
 export function startScheduler(getBot) {
 
     /*
-     * Deadline notifications (every 5 minutes)
+     * Esecuzione notifiche (ogni 5 minuti)
      */
     cron.schedule('*/5 * * * *', async () => {
         const bot = getBot();
@@ -27,7 +26,7 @@ export function startScheduler(getBot) {
                 const fullNote = await getNoteById(simpleNote.id, simpleNote.chatId);
 
                 if (!fullNote) {
-                    console.warn(`Scheduler: note #${simpleNote.id} not found, skipped.`);
+                    console.warn(`Schedulatore: Nota ID #${simpleNote.id} non trovata, saltata.`);
                     continue;
                 }
 
@@ -36,11 +35,11 @@ export function startScheduler(getBot) {
                         const absolutePath = path.resolve(fullNote.localPath);
                         if (fs.existsSync(absolutePath)) {
                             await bot.sendDocument(fullNote.chatId, absolutePath, {
-                                caption: t('bot.note.attachment_caption', { task: fullNote.task })
+                                caption: ` Allegato per: ${fullNote.task}`
                             });
                         }
                     } catch (err) {
-                        console.error(`Error while sending local file for note ${fullNote.id}:`, err);
+                        console.error(`Errore invio file locale per nota ${fullNote.id}:`, err);
                     }
                 }
 
@@ -52,15 +51,15 @@ export function startScheduler(getBot) {
                 });
 
                 await markNoteAsNotified(fullNote.id);
-                console.log(`Scheduler: notification sent for note #${fullNote.id} to chat ${fullNote.chatId}`);
+                console.log(`Schedulatore: Notifica TEMPORALE completa inviata per ID #${fullNote.id} a chat ${fullNote.chatId}`);
             }
         } catch (error) {
-            console.error('Scheduler ERROR (deadlines):', error);
+            console.error('ERRORE nello Schedulatore (Tempo):', error);
         }
-    }, { timezone: TIMEZONE });
+    });
 
     /*
-     * Daily summary of overdue notes (every day at 09:00, in the configured timezone)
+     * Riepilogo Quotidiano Note Scadute (Ogni giorno alle 09:00)
      */
     cron.schedule('0 9 * * *', async () => {
         const bot = getBot();
@@ -79,13 +78,14 @@ export function startScheduler(getBot) {
                 notesByChat[chatId].push(note);
             });
 
-            for (const chatId of Object.keys(notesByChat)) {
+            const chatIdsToNotify = Object.keys(notesByChat);
+
+            for (const chatId of chatIdsToNotify) {
                 const notes = notesByChat[chatId];
 
                 await bot.sendMessage(chatId,
-                    t('scheduler.overdue_summary', { count: notes.length }),
-                    { parse_mode: 'Markdown' }
-                );
+                    `*ATTENZIONE: Riepilogo delle Note SCADUTE non Completate*\n\nHai *${notes.length}* promemoria scaduti in sospeso:`
+                , { parse_mode: 'Markdown' });
 
                 for (const note of notes) {
                     const { text: message, markup: keyboard } = formatNoteForReply(note, true, false);
@@ -96,10 +96,10 @@ export function startScheduler(getBot) {
                         reply_markup: keyboard
                     });
                 }
-                console.log(`Scheduler: overdue summary sent to chat ${chatId} (${notes.length} notes).`);
+                console.log(`Schedulatore: Riepilogo SCADUTI inviato a chat ${chatId} con ${notes.length} note.`);
             }
         } catch (error) {
-            console.error('Scheduler ERROR (overdue summary):', error);
+            console.error('ERRORE nello Schedulatore (Riepilogo Scaduti):', error);
         }
-    }, { timezone: TIMEZONE });
+    });
 }

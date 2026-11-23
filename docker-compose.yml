@@ -1,19 +1,16 @@
 services:
   app:
     build: .
-    container_name: telegram-notes
+    container_name: telegram-smart-notes
     restart: unless-stopped
     env_file:
       - .env
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
-      # Named Docker volume: data (DB + attachments) survives container restarts
-      - notes-data:/usr/src/app/data
+      # Volume Docker gestito automaticamente: i dati (DB + allegati) sopravvivono ai riavvii del container
+      #- notes-data:/usr/src/app/data
 
-      # Alternatively, to keep the data in a local folder visible on the host,
-      # comment out the line above and use this one (create the ./data folder first):
-      # - ./data:/usr/src/app/data
-
-volumes:
-  notes-data:
+      # In alternativa, per avere i dati in una cartella locale visibile sull'host,
+      # commenta la riga sopra e usa questa (crea prima la cartella ./data):
+      - ./data:/usr/src/app/data

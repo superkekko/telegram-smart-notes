@@ -1,16 +1,16 @@
-# Node.js base image
+# Immagine base Node.js
 FROM node:20-slim
 
 WORKDIR /usr/src/app
 
-# Install only the package files first to take advantage of Docker layer caching
+# Installa prima solo i file dei pacchetti per sfruttare la cache dei layer Docker
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# Copy the rest of the application code
+# Copia il resto del codice dell'applicazione
 COPY . .
 
-# Create the data folder (in production it is normally replaced by a mounted volume)
+# Crea la cartella dati (verrà comunque sovrascritta da un volume in produzione)
 RUN mkdir -p data/attachments
 
 EXPOSE 3000

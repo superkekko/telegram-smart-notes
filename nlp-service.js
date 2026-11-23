@@ -1,52 +1,47 @@
 import { GoogleGenAI } from "@google/genai";
-import 'dotenv/config';
-import { TIMEZONE } from './i18n.js';
-import { formatIsoNow } from './utils.js';
+import 'dotenv/config'; 
 
-// Initialize the API with the key from the .env file
+// Inizializza l'API con la chiave dal file .env
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 3; 
 
-// CLASSIFICATION SCHEMA
+// SCHEMA DI CLASSIFICAZIONE
 const classificationSchema = {
     type: "OBJECT",
     properties: {
         task: {
             type: "STRING",
-            description: "The core text of the note or task to perform, without the deadline information. Keep the same language as the user's text."
+            description: "Il testo centrale della nota o del compito da svolgere, depurato dalle informazioni di scadenza."
         },
         deadline: {
             type: "STRING",
-            description: "The deadline in the format YYYY-MM-DD HH:MM:SS. If no deadline is specified, leave empty."
+            description: "La scadenza nel formato YYYY-MM-DD HH:MM:SS. Se non è specificata una scadenza, lascia vuoto."
         },
-        recurrence: {
-            type: "STRING",
+        recurrence: { 
+            type: "STRING", 
             enum: ["daily", "weekly", "monthly", "yearly", null],
-            description: "Frequency of the activity if it is repeating (e.g. every day, every week)."
+            description: "Frequenza dell'attività se ripetitiva (es. ogni giorno, ogni settimana)." 
         }
     },
     required: ["task"]
 };
 
-// Classifies the note text using the Gemini model.
-// The user's text can be written in any language.
+// Classifica il testo della nota usando il modello Gemini.
 export async function classifyInput(text) {
-    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: TIMEZONE }).format(new Date());
-    const now = `${formatIsoNow()} (${weekday})`;
-
+    const now = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
+    
     const systemPrompt = `
-You are a personal assistant. Analyze the provided text and extract the reminder details.
-The text may be written in any language.
-CURRENT DATE AND TIME (timezone ${TIMEZONE}): ${now}
-
-Extraction rules:
-1. Extract the main action or task into 'task', keeping the user's original language and removing the deadline/recurrence wording.
-2. 'deadline' must be in the format YYYY-MM-DD HH:MM:SS, expressed in the timezone above. If there is no explicit deadline, leave it empty. If only a date is given (e.g. "tomorrow"), use 09:00:00 as the default time.
-3. If the user indicates a repetition (e.g. 'every day', 'every Tuesday', 'every month'), set the recurrence to 'daily', 'weekly', 'monthly' or 'yearly'. The 'deadline' must be the first upcoming date on which the activity has to be performed.`;
-
-    const prompt = `Classify the following note as JSON:\n\n"${text}"`;
-
+    	Sei un assistente personale. Analizza il testo fornito ed estrai i dettagli del promemoria.
+	    CONTESTO TEMPORALE CORRENTE: ${now}
+    
+	    Regole di estrazione:
+	    1. Estrai l'azione o il compito principale in 'task'.
+	    2. La 'deadline' deve essere nel formato: YYYY-MM-DD HH:MM:SS. Se non c'è una scadenza esplicita, lasciala vuota. Se viene indicata solo una data (es. "domani"), imposta le 09:00:00 come orario predefinito.
+	    3. Se l'utente indica una ripetizione (es. 'ogni giorno', 'tutti i martedì', 'ogni mese') identifica la ricorrenza come 'daily', 'weekly', 'monthly' o 'yearly'. La 'deadline' deve corrispondere al primo giorno utile in cui eseguire l'attività.`;
+    	
+    const prompt = `Classifica la seguente nota in formato JSON:\n\n"${text}"`;
+    
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             const response = await ai.models.generateContent({
@@ -59,24 +54,28 @@ Extraction rules:
                 },
             });
 
-            // If the response is valid, return the parsed JSON
-            return JSON.parse(response.text.trim());
+            // Se la risposta è valida, ritorna il JSON
+            const jsonResponse = response.text.trim();
+            return JSON.parse(jsonResponse);
 
         } catch (error) {
-            console.error(`[API Error - Attempt ${attempt}/${MAX_RETRIES}]:`, error.message);
+            console.error(`[API Error - Tentativo ${attempt}/${MAX_RETRIES}]:`, error.message);
+            
+            // Controlla se l'errore è ritentabile
+            const isRetryableError = error.message.includes('503') || error.message.includes('overloaded') || attempt < MAX_RETRIES;
 
-            if (attempt < MAX_RETRIES) {
-                // Exponential backoff: 2s, 4s
+            if (attempt < MAX_RETRIES && isRetryableError) {
+                // Backoff Esponenziale: 2s, 4s
                 const delayMs = Math.pow(2, attempt) * 1000;
-                console.log(`Retrying in ${delayMs / 1000} seconds...`);
+                console.log(`Ritento tra ${delayMs / 1000} secondi...`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             } else {
-                // DEFAULT CLASSIFICATION (FALLBACK) AFTER THE LAST FAILED ATTEMPT
-                console.warn(`AI classification failed after ${attempt} attempts.`);
-
+                // CLASSIFICAZIONE DI DEFAULT (FALLBACK) DOPO L'ULTIMO TENTATIVO FALLITO
+                console.warn(`Classificazione AI fallita dopo ${attempt} tentativi.`);
+                
                 return {
-                    task: text,
-                    deadline: null,
+                    task: text,     
+                    deadline: null, 
                     recurrence: null
                 };
             }
